@@ -1,0 +1,91 @@
+name: Build optimized arm64 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [optimized]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    env:
+      NATIVE_TARGET: arm64-v8a
+      CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      CCACHE_HARDLINK: "true"
+      CCACHE_NOHASHDIR: "true"
+      CCACHE_MAXSIZE: "10G"
+      CCACHE_SLOPPINESS: "include_file_ctime,include_file_mtime,time_macros"
+      CCACHE_BASEDIR: "${{ github.workspace }}"
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup /usr/local/share/boost "$AGENT_TOOLSDIRECTORY"
+          df -h /
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: recursive
+
+      - name: Apply native patches
+        working-directory: TMessagesProj/jni
+        run: ./patches/tgcalls.sh
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: microsoft
+          java-version: '21'
+
+      - uses: hendrikmuhs/ccache-action@v1.2
+        with:
+          key: optimized-arm64
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Android SDK & NDK
+        run: |
+          SM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SM" --licenses > /dev/null
+          "$SM" "platform-tools" "platforms;android-37.0" "build-tools;37.0.0" "ndk;27.2.12479018"
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends --yes nasm
+          echo "sdk.dir=${ANDROID_HOME}" >> local.properties
+
+      - name: Signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          ALIAS_NAME: ${{ secrets.ALIAS_NAME }}
+          ALIAS_PASS: ${{ secrets.ALIAS_PASS }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > TMessagesProj/release.keystore
+            echo "KEYSTORE_PASS=$KEYSTORE_PASS" >> $GITHUB_ENV
+            echo "ALIAS_NAME=$ALIAS_NAME" >> $GITHUB_ENV
+            echo "ALIAS_PASS=$ALIAS_PASS" >> $GITHUB_ENV
+            echo "Signing with the keystore from repository secrets"
+          else
+            # No secrets: sign with a one-off key. The APK installs, but the next build
+            # will have a different signature and can't update it in place.
+            PASS=$(openssl rand -hex 16)
+            keytool -genkeypair -keystore TMessagesProj/release.keystore -storepass "$PASS" -keypass "$PASS" \
+              -alias niagram -keyalg RSA -keysize 4096 -validity 10000 -dname "CN=Niagram local build" > /dev/null
+            echo "KEYSTORE_PASS=$PASS" >> $GITHUB_ENV
+            echo "ALIAS_NAME=niagram" >> $GITHUB_ENV
+            echo "ALIAS_PASS=$PASS" >> $GITHUB_ENV
+            echo "::warning::No KEYSTORE_BASE64 secret: signed with a one-off key, updates will need a reinstall"
+          fi
+
+      - name: Gradle memory
+        run: |
+          sed -i '/^org\.gradle\.jvmargs=/d' gradle.properties
+          printf '\norg.gradle.jvmargs=-Xmx5G -XX:MaxMetaspaceSize=1536M -XX:+UseParallelGC -Dfile.encoding=UTF-8\n' >> gradle.properties
+
+      - name: Build
+        run: ./gradlew TMessagesProj:assembleRelease --build-cache --parallel --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Niagram-optimized-arm64
+          path: TMessagesProj/build/outputs/apk/release/*.apk

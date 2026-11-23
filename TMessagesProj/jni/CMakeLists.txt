@@ -7,9 +7,18 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_FLAGS "-DANDROID")
 set(CMAKE_C_FLAGS "-w -std=c11 -DANDROID -D_LARGEFILE_SOURCE=1 -Wno-error=implicit-function-declaration")
 set(CMAKE_ASM_FLAGS "${CFLAGS} -x assembler-with-cpp")
-set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -flto=full -Oz")
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -fvisibility-inlines-hidden -flto=full -Oz")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -flto=full -O2")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -ffunction-sections -fdata-sections -fvisibility=hidden -fvisibility-inlines-hidden -flto=full -O2")
 set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -flto=full -Wl,--gc-sections -Wl,--icf=all -Wl,-Bsymbolic")
+
+# Luki2421: optimize native code for speed (-O2 instead of -Oz) and for the
+# Snapdragon 8 Gen 5 (SM8845, Oryon). Only ARMv8.6 extensions that Oryon and
+# recent Cortex-X cores implement are enabled; no SVE, so no SIGILL risk there.
+if (${ANDROID_ABI} STREQUAL "arm64-v8a")
+    set(NIAGRAM_ARM64_TUNE "-march=armv8.6-a+crypto+fp16+dotprod+i8mm+bf16")
+    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${NIAGRAM_ARM64_TUNE}")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${NIAGRAM_ARM64_TUNE}")
+endif()
 
 if (${ANDROID_ABI} STREQUAL "armeabi-v7a" OR ${ANDROID_ABI} STREQUAL "arm64-v8a")
     enable_language(ASM)
