@@ -90,9 +90,20 @@ public class LiteMode {
     ); // 262143
     public static int PRESET_POWER_SAVER = 0;
 
-    private static int BATTERY_LOW = 10;
-    private static int BATTERY_MEDIUM = 10;
-    private static int BATTERY_HIGH = 10;
+    // Luki2421: switch to the power saver preset at 20% battery instead of 10%,
+    // also when the server's appconfig suggests a lower threshold
+    private static final int MIN_BATTERY_LEVEL = 20;
+    private static int BATTERY_LOW = MIN_BATTERY_LEVEL;
+    private static int BATTERY_MEDIUM = MIN_BATTERY_LEVEL;
+    private static int BATTERY_HIGH = MIN_BATTERY_LEVEL;
+
+    // Luki2421: effects that cost the most GPU/decoder time for little visual value.
+    // They are off by default on new installs and can be turned back on in Power Saving.
+    private static final int BATTERY_FRIENDLY_DISABLED_BY_DEFAULT = (
+        FLAG_CHAT_BLUR |
+        FLAG_CHAT_BACKGROUND |
+        FLAG_AUTOPLAY_VIDEOS
+    );
 
     private static int powerSaverLevel;
     private static boolean lastPowerSaverApplied;
@@ -246,9 +257,9 @@ public class LiteMode {
             } else if ("battery_low".equals(kv.key) && kv.value instanceof TLRPC.TL_jsonArray) {
                 ArrayList<TLRPC.JSONValue> array = ((TLRPC.TL_jsonArray) kv.value).value;
                 try {
-                    BATTERY_LOW = (int) ((TLRPC.TL_jsonNumber) array.get(0)).value;
-                    BATTERY_MEDIUM = (int) ((TLRPC.TL_jsonNumber) array.get(1)).value;
-                    BATTERY_HIGH = (int) ((TLRPC.TL_jsonNumber) array.get(2)).value;
+                    BATTERY_LOW = Math.max(MIN_BATTERY_LEVEL, (int) ((TLRPC.TL_jsonNumber) array.get(0)).value);
+                    BATTERY_MEDIUM = Math.max(MIN_BATTERY_LEVEL, (int) ((TLRPC.TL_jsonNumber) array.get(1)).value);
+                    BATTERY_HIGH = Math.max(MIN_BATTERY_LEVEL, (int) ((TLRPC.TL_jsonNumber) array.get(2)).value);
                 } catch (Exception e) {
                     FileLog.e(e);
                 }
@@ -266,6 +277,7 @@ public class LiteMode {
             defaultValue = PRESET_MEDIUM;
             batteryDefaultValue = BATTERY_MEDIUM;
         }
+        defaultValue &= ~BATTERY_FRIENDLY_DISABLED_BY_DEFAULT;
 
         final SharedPreferences preferences = MessagesController.getGlobalMainSettings();
         if (!preferences.contains("lite_mode6")) {
