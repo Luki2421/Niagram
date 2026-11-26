@@ -54,12 +54,26 @@ jobs:
 
       - name: Signing key
         env:
+          SIGNING_PASSWORD: ${{ secrets.SIGNING_PASSWORD }}
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
           KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
           ALIAS_NAME: ${{ secrets.ALIAS_NAME }}
           ALIAS_PASS: ${{ secrets.ALIAS_PASS }}
         run: |
-          if [ -n "$KEYSTORE_BASE64" ]; then
+          if [ -n "$SIGNING_PASSWORD" ]; then
+            # Stable key: AES-256 encrypted keystore in the repo, password in the
+            # SIGNING_PASSWORD secret (used for the keystore and the key as well).
+            printf '%s' "$SIGNING_PASSWORD" > "$RUNNER_TEMP/signing.pass"
+            openssl enc -d -aes-256-cbc -pbkdf2 -iter 600000 \
+              -in .github/signing/release.keystore.enc -out TMessagesProj/release.keystore \
+              -pass file:"$RUNNER_TEMP/signing.pass"
+            rm -f "$RUNNER_TEMP/signing.pass"
+            echo "::add-mask::$SIGNING_PASSWORD"
+            echo "KEYSTORE_PASS=$SIGNING_PASSWORD" >> $GITHUB_ENV
+            echo "ALIAS_NAME=niagram" >> $GITHUB_ENV
+            echo "ALIAS_PASS=$SIGNING_PASSWORD" >> $GITHUB_ENV
+            echo "Signing with the stable key from .github/signing"
+          elif [ -n "$KEYSTORE_BASE64" ]; then
             echo "$KEYSTORE_BASE64" | base64 -d > TMessagesProj/release.keystore
             echo "KEYSTORE_PASS=$KEYSTORE_PASS" >> $GITHUB_ENV
             echo "ALIAS_NAME=$ALIAS_NAME" >> $GITHUB_ENV
@@ -74,7 +88,7 @@ jobs:
             echo "KEYSTORE_PASS=$PASS" >> $GITHUB_ENV
             echo "ALIAS_NAME=niagram" >> $GITHUB_ENV
             echo "ALIAS_PASS=$PASS" >> $GITHUB_ENV
-            echo "::warning::No KEYSTORE_BASE64 secret: signed with a one-off key, updates will need a reinstall"
+            echo "::warning::No SIGNING_PASSWORD secret: signed with a one-off key, updates will need a reinstall"
           fi
 
       - name: Gradle memory
@@ -84,6 +98,13 @@ jobs:
 
       - name: Build
         run: ./gradlew TMessagesProj:assembleRelease --build-cache --parallel --stacktrace
+
+      - name: Show signing certificate
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | tail -1)
+          for apk in TMessagesProj/build/outputs/apk/release/*.apk; do
+            "$APKSIGNER" verify --print-certs "$apk" | grep -E "SHA-256|DN"
+          done
 
       - uses: actions/upload-artifact@v4
         with:
